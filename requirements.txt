@@ -3,3 +3,4 @@ pydantic
 transformers
 accelerate
 torch
+uvicorn
