@@ -1,100 +1,143 @@
+import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
+from datetime import datetime
 
-# Описание класса запроса
+# Define query class
 class ArticleRequest(BaseModel):
+    system_prompt: str
     prompt: str
+    context: str
 
-# Инициализация FastAPI
-app = FastAPI()
+# Load the tokenizer and model
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model_name = 'Qwen/Qwen3-0.6B'  # 'Qwen/Qwen3-4B-Thinking-2507'
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype="auto",
+    device_map="auto"
+)
 
-# Имя модели
-MODEL_NAME = 'Qwen/Qwen3-4B-Thinking-2507'
+# Answer generation function
+def generate_llm_answer(request: ArticleRequest):
+    start_ts = datetime.now().timestamp()
 
-# Загрузка токенайзера и модели
-try:
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        torch_dtype=torch.float16,
-        device_map="auto"
-    )
-except Exception as e:
-    raise RuntimeError(f"Ошибка загрузки модели: {e}")
-
-@app.get('/api')
-async def get_pages():
-    return [
-        {"name": "Перечень страниц", "url": "/api"},
-        {"name": "Проверка работоспособности", "url": "/health"},
-        {"name": "Вызов LLM", "url": "/api/answer"}
-    ]
-
-@app.get('/health')
-async def health_check():
-    return {"status": "ok", "model_loaded": bool(model)}
-
-@app.post('/api/answer')
-async def generate_answer(request: ArticleRequest):
-    # Проверка наличия промпта
     if not request.prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
 
-    prompt = request.prompt
-    messages = [{"role": "user", "content": prompt}]
+    # Form system prompt
+    if not request.system_prompt:
+        system_prompt = '''Ты — умный и вежливый ассистент.
+        Отвечай подробно, но без лишней воды.
+        Если не знаешь ответа — скажи прямо.
+        Говори на русском языке.'''
+    else:
+        system_prompt = request.system_prompt
 
-    # Подготовка ввода для модели
+    # Build chat messages
+    messages = [
+        {"role": "system", "content": system_prompt},
+    ]
+
+    # Add context if provided
+    if request.context:
+        messages.append({
+            "role": "user",
+            "content": f"Контекст для ответа:\n\n{request.context}"
+        })
+
+    # Add user prompt
+    messages.append({
+        "role": "user",
+        "content": request.prompt
+    })
+
+    # Apply chat template
     try:
         text = tokenizer.apply_chat_template(
             messages,
             tokenize=False,
-            add_generation_prompt=True
+            add_generation_prompt=True,
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка шаблонизации: {e}")
+
+    # Tokenize input
+    try:
         model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка подготовки ввода: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка токенизации: {e}")
 
-    # Генерация ответа
+    # Generate response
     try:
         generated_ids = model.generate(
             **model_inputs,
-            max_new_tokens=32768
+            max_new_tokens=32768, # на слабых GPU начинаем с 1024
+            do_sample=True,          # включение вероятностной генерации
+            temperature=0.7,     # температура
+            top_p=0.9,         # фильтрация маловероятных токенов
         )
         output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации: {e}")
 
-    # Поиск токена </think> (ID 151668)
+    # Parse thinking content (if used)
     THINK_TOKEN_ID = 151668
     try:
-        # Ищем последний вхождение токена (с конца)
         index = len(output_ids) - output_ids[::-1].index(THINK_TOKEN_ID)
     except ValueError:
-        index = 0  # Если токен не найден
+        index = 0
 
-    # Декодирование частей ответа
-    try:
-        thinking_content = tokenizer.decode(
-            output_ids[:index],
-            skip_special_tokens=True
-        ).strip("\n")
-        content = tokenizer.decode(
-            output_ids[index:],
-            skip_special_tokens=True
-        ).strip("\n")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка декодирования: {e}")
+    thinking_content = tokenizer.decode(
+        output_ids[:index], 
+        skip_special_tokens=True
+    ).strip("\n")
+    
+    content = tokenizer.decode(
+        output_ids[index:],
+        skip_special_tokens=True
+    ).strip("\n")
 
-    # Формирование ответа
+    end_ts = datetime.now().timestamp()
+
+    # Prepare response data
     data = {
-        "thinking_content": thinking_content,
-        "content": content
+        'duration_time': {
+            'start': start_ts,
+            'end': end_ts,
+            'total_seconds': end_ts - start_ts
+        },
+        'device': device,
+        'messages': messages,
+        'thinking_content': thinking_content,
+        'content': content
     }
     return data
 
-# Запуск сервера
+# API
 if __name__ == '__main__':
-    import uvicorn
-    uvicorn.run(app, host='0.0.0.0', port=5000)
+  # FastAPI app init
+  app = FastAPI()
+  
+  @app.get('/api')
+  async def get_pages():
+    return [
+      {"name": "Перечень страниц", "url": "/api"},
+      {"name": "Проверка работоспособности", "url": "/health"},
+      {"name": "Вызов LLM", "url": "/api/answer"},
+    ]
+
+  @app.get('/health')
+  async def health_check():
+    return {"status": "ok", "model_loaded": bool(model)}
+
+  @app.post('/api/answer')
+  async def generate_answer(request: ArticleRequest):
+    result = generate_llm_answer(request)
+    return result
+
+  # launch
+  import uvicorn
+  uvicorn.run(app, host='0.0.0.0', port=5000)
