@@ -6,13 +6,27 @@ from datetime import datetime
 
 # Define query class
 class ArticleRequest(BaseModel):
+    model_family: str
+    model_size: str
+    model_type: str
     system_prompt: str
     prompt: str
     context: str
 
 # Load the tokenizer and model
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model_name = 'Qwen/Qwen3-0.6B'  # 'Qwen/Qwen3-4B-Thinking-2507'
+if model_family == 'qwen3':
+    if size == '0.6B':
+        model_name = 'Qwen/Qwen3-0.6B'
+    elif size == '1.7B':    
+        model_name = 'Qwen/Qwen3-1.7B'
+    elif size == '4B':
+        model_name = 'Qwen/Qwen3-4B'
+    elif size == '4B-Instruct':
+        model_name = 'Qwen/Qwen3-4B-Instruct-2507'
+    elif size == '8B':
+        model_name = 'Qwen/Qwen3-8B'
+
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
@@ -24,6 +38,13 @@ model = AutoModelForCausalLM.from_pretrained(
 def generate_llm_answer(request: ArticleRequest):
     start_ts = datetime.now().timestamp()
 
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype="auto",
+        device_map="auto"
+    )
+    
     if not request.prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
 
