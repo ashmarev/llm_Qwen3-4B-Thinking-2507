@@ -15,16 +15,17 @@ class ArticleRequest(BaseModel):
 
 # Load the tokenizer and model
 device = "cuda" if torch.cuda.is_available() else "cpu"
+model_name = 'Qwen/Qwen3-0.6B'
 if model_family == 'qwen3':
-    if size == '0.6B':
+    if model_size == '0.6B':
         model_name = 'Qwen/Qwen3-0.6B'
-    elif size == '1.7B':    
+    elif model_size == '1.7B':    
         model_name = 'Qwen/Qwen3-1.7B'
-    elif size == '4B':
+    elif model_size == '4B':
         model_name = 'Qwen/Qwen3-4B'
-    elif size == '4B-Instruct':
+    elif model_size == '4B-Instruct':
         model_name = 'Qwen/Qwen3-4B-Instruct-2507'
-    elif size == '8B':
+    elif model_size == '8B':
         model_name = 'Qwen/Qwen3-8B'
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
