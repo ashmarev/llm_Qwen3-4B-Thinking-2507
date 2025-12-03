@@ -37,8 +37,6 @@ model = AutoModelForCausalLM.from_pretrained(
 
 # Answer generation function
 def generate_llm_answer(request: ArticleRequest):
-    start_ts = datetime.now().timestamp()
-
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -46,6 +44,8 @@ def generate_llm_answer(request: ArticleRequest):
         device_map="auto"
     )
     
+    start_ts = datetime.now().timestamp()
+
     if not request.prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
 
